@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, type FormEvent, type ChangeEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import { io, type Socket } from 'socket.io-client';
-import { SUPPORTED_LANGUAGES, type Message } from '../../../shared/types';
+import { SUPPORTED_LANGUAGES, UI_TRANSLATIONS, type Message } from '../../../shared/types';
 
 // SpeechRecognition type
 interface SpeechRecognitionEvent {
@@ -28,7 +28,8 @@ export default function GuestChat() {
   const { slug } = useParams<{ slug: string }>();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
-  const [selectedLang, setSelectedLang] = useState('en');
+  const [selectedLang, setSelectedLang] = useState('');
+  const [langSelected, setLangSelected] = useState(false);
   const [hostName, setHostName] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -37,16 +38,20 @@ export default function GuestChat() {
   const [nameInput, setNameInput] = useState('');
   const [showNamePrompt, setShowNamePrompt] = useState(false);
   const [roomNotFound, setRoomNotFound] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roomDataRef = useRef<{ hostName: string; guestName: string | null; guestLang: string } | null>(null);
 
   const hasSpeechRecognition = typeof window !== 'undefined' &&
     ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+
+  // i18n helper
+  const t = (key: string) => UI_TRANSLATIONS[selectedLang]?.[key] || key;
 
   // Scroll to bottom
   const scrollToBottom = () => {
@@ -57,13 +62,14 @@ export default function GuestChat() {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  // Fetch room info and connect socket
+  // Language selected -> fetch room info and connect socket
   useEffect(() => {
-    if (!slug) return;
+    if (!slug || !langSelected) return;
 
     let socket: Socket;
 
     const init = async () => {
+      setLoading(true);
       try {
         // Fetch room info
         const roomRes = await fetch(`/api/chat/${slug}`);
@@ -73,8 +79,8 @@ export default function GuestChat() {
           return;
         }
         const roomData = await roomRes.json();
+        roomDataRef.current = roomData;
         setHostName(roomData.hostName);
-        setSelectedLang(roomData.guestLang || 'en');
         if (roomData.guestName) {
           setGuestName(roomData.guestName);
         } else {
@@ -97,6 +103,8 @@ export default function GuestChat() {
         socket.on('connect', () => {
           setIsConnected(true);
           socket.emit('room:join', { slug, role: 'guest' });
+          // Notify server of language choice
+          socket.emit('language:change', { lang: selectedLang });
         });
 
         socket.on('disconnect', () => {
@@ -149,7 +157,13 @@ export default function GuestChat() {
         clearTimeout(typingTimeoutRef.current);
       }
     };
-  }, [slug]);
+  }, [slug, langSelected]);
+
+  // Handle language selection from the welcome page
+  const handleLangSelect = (langCode: string) => {
+    setSelectedLang(langCode);
+    setLangSelected(true);
+  };
 
   // Send message
   const handleSend = (e?: FormEvent) => {
@@ -175,7 +189,7 @@ export default function GuestChat() {
     inputRef.current?.focus();
   };
 
-  // Language change
+  // Language change (in-chat dropdown)
   const handleLangChange = (e: ChangeEvent<HTMLSelectElement>) => {
     const lang = e.target.value;
     setSelectedLang(lang);
@@ -233,31 +247,58 @@ export default function GuestChat() {
     socketRef.current?.emit('typing:start');
   };
 
-  // Loading state
+  // === Language Selection Page ===
+  if (!langSelected) {
+    return (
+      <div className="h-dvh flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 to-white px-6">
+        <div className="text-center mb-10">
+          <div className="text-5xl mb-4">🌐</div>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">TranslaChat</h1>
+          <p className="text-gray-400 text-sm">Select your language / Choose your language</p>
+        </div>
+
+        <div className="w-full max-w-sm space-y-3">
+          {SUPPORTED_LANGUAGES.map(lang => (
+            <button
+              key={lang.code}
+              onClick={() => handleLangSelect(lang.code)}
+              className="w-full flex items-center gap-4 px-5 py-4 bg-white border border-gray-200 rounded-2xl shadow-sm hover:border-blue-400 hover:shadow-md active:scale-[0.98] transition-all"
+            >
+              <span className="text-3xl">{lang.flag}</span>
+              <span className="text-lg font-medium text-gray-700">{lang.nativeName}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // === Loading state ===
   if (loading) {
     return (
       <div className="h-dvh flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="inline-block animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4" />
-          <p className="text-gray-500">Loading chat...</p>
+          <p className="text-gray-500">{t('loading')}</p>
         </div>
       </div>
     );
   }
 
-  // Room not found
+  // === Room not found ===
   if (roomNotFound) {
     return (
       <div className="h-dvh flex items-center justify-center bg-gray-50">
         <div className="text-center px-6">
           <div className="text-6xl mb-4">😕</div>
-          <h2 className="text-xl font-semibold text-gray-700 mb-2">Chat not found</h2>
-          <p className="text-gray-500">This chat link may be invalid or expired.</p>
+          <h2 className="text-xl font-semibold text-gray-700 mb-2">{t('chatNotFound')}</h2>
+          <p className="text-gray-500">{t('linkInvalid')}</p>
         </div>
       </div>
     );
   }
 
+  // === Chat UI ===
   return (
     <div className="h-dvh flex flex-col bg-gray-50">
       {/* Header */}
@@ -266,19 +307,19 @@ export default function GuestChat() {
           <div>
             <h1 className="text-lg font-bold tracking-tight">TranslaChat</h1>
             <p className="text-sm text-blue-100">
-              {hostName ? `Chat with ${hostName}` : 'Loading...'}
+              {hostName ? `${t('chatWith')} ${hostName}` : t('loading')}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <span className={`inline-block w-2 h-2 rounded-full ${isConnected ? 'bg-green-300' : 'bg-red-400'}`} />
-            <span className="text-xs text-blue-200">{isConnected ? 'Online' : 'Offline'}</span>
+            <span className="text-xs text-blue-200">{isConnected ? t('online') : t('offline')}</span>
           </div>
         </div>
       </header>
 
       {/* Language selector */}
       <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-2">
-        <span className="text-sm text-gray-500 whitespace-nowrap">My language:</span>
+        <span className="text-sm text-gray-500 whitespace-nowrap">{t('myLanguage')}</span>
         <select
           value={selectedLang}
           onChange={handleLangChange}
@@ -296,12 +337,12 @@ export default function GuestChat() {
       {showNamePrompt && (
         <div className="bg-blue-50 border-b border-blue-200 px-4 py-3">
           <form onSubmit={handleNameSubmit} className="flex items-center gap-2">
-            <span className="text-sm text-blue-700 whitespace-nowrap">Your name:</span>
+            <span className="text-sm text-blue-700 whitespace-nowrap">{t('yourName')}:</span>
             <input
               type="text"
               value={nameInput}
               onChange={(e) => setNameInput(e.target.value)}
-              placeholder="Enter your name"
+              placeholder={t('enterName')}
               className="flex-1 text-sm border border-blue-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
               autoFocus
             />
@@ -309,7 +350,7 @@ export default function GuestChat() {
               type="submit"
               className="bg-blue-600 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-blue-700 transition"
             >
-              OK
+              {t('confirm')}
             </button>
           </form>
         </div>
@@ -320,8 +361,8 @@ export default function GuestChat() {
         {messages.length === 0 && (
           <div className="text-center text-gray-400 mt-12">
             <div className="text-4xl mb-3">💬</div>
-            <p className="text-sm">Start the conversation!</p>
-            <p className="text-xs text-gray-300 mt-1">Messages are automatically translated</p>
+            <p className="text-sm">{t('startConversation')}</p>
+            <p className="text-xs text-gray-300 mt-1">{t('autoTranslated')}</p>
           </div>
         )}
 
@@ -421,7 +462,7 @@ export default function GuestChat() {
             type="text"
             value={inputText}
             onChange={handleInputChange}
-            placeholder="Type a message..."
+            placeholder={t('typeMessage')}
             className="flex-1 border border-gray-300 rounded-full px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
           />
 

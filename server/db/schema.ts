@@ -16,7 +16,7 @@ export const rooms = sqliteTable('rooms', {
   hostId: integer('host_id').notNull().references(() => hosts.id),
   label: text('label').notNull(),
   guestName: text('guest_name'),
-  guestLang: text('guest_lang').default('en'),
+  guestLang: text('guest_lang').default('th'),
   hostLang: text('host_lang').default('zh-TW'),
   status: text('status').default('active'),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),

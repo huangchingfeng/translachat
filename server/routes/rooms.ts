@@ -12,7 +12,7 @@ router.use(authMiddleware);
 
 // GET / - 列出 host 的所有房間，包含最後一則訊息預覽
 router.get('/', (req, res) => {
-  const hostId = req.host!.id;
+  const hostId = req.authUser!.id;
 
   const allRooms = db
     .select()
@@ -42,7 +42,7 @@ router.get('/', (req, res) => {
 
 // POST / - 建立新房間
 router.post('/', (req, res) => {
-  const hostId = req.host!.id;
+  const hostId = req.authUser!.id;
   const { label, hostLang } = req.body;
 
   if (!label) {
@@ -70,7 +70,7 @@ router.post('/', (req, res) => {
 
 // PATCH /:id - 更新房間
 router.patch('/:id', (req, res) => {
-  const hostId = req.host!.id;
+  const hostId = req.authUser!.id;
   const roomId = Number(req.params.id);
   const { label, status } = req.body;
 
@@ -100,7 +100,7 @@ router.patch('/:id', (req, res) => {
 
 // DELETE /:id - 刪除房間及所有訊息
 router.delete('/:id', (req, res) => {
-  const hostId = req.host!.id;
+  const hostId = req.authUser!.id;
   const roomId = Number(req.params.id);
 
   const room = db
@@ -122,7 +122,7 @@ router.delete('/:id', (req, res) => {
 
 // GET /:id/messages - 取得房間訊息（分頁）
 router.get('/:id/messages', (req, res) => {
-  const hostId = req.host!.id;
+  const hostId = req.authUser!.id;
   const roomId = Number(req.params.id);
   const limit = Math.min(Number(req.query.limit) || 50, 100);
   const before = req.query.before ? Number(req.query.before) : undefined;

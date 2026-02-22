@@ -63,7 +63,7 @@ export function setupSocket(httpServer: any): void {
       socket.emit('room:joined', {
         roomId: room.id,
         hostLang: room.hostLang || 'zh-TW',
-        guestLang: room.guestLang || 'en',
+        guestLang: room.guestLang || 'th',
       });
 
       // 訪客上線通知
@@ -91,11 +91,12 @@ export function setupSocket(httpServer: any): void {
       const room = db.select().from(rooms).where(eq(rooms.slug, slug)).get();
       if (!room) return;
 
-      // 決定目標語言
-      const targetLang = role === 'host' ? (room.guestLang || 'en') : (room.hostLang || 'zh-TW');
+      // 決定來源語言和目標語言
+      const actualSourceLang = sourceLang || (role === 'host' ? (room.hostLang || 'zh-TW') : (room.guestLang || 'th'));
+      const targetLang = role === 'host' ? (room.guestLang || 'th') : (room.hostLang || 'zh-TW');
 
       // 翻譯
-      const translatedText = await translate(text, sourceLang, targetLang);
+      const translatedText = await translate(text, actualSourceLang, targetLang);
 
       // 寫入資料庫
       const result = db.insert(messages).values({
@@ -103,7 +104,7 @@ export function setupSocket(httpServer: any): void {
         sender: role,
         originalText: text,
         translatedText,
-        sourceLang,
+        sourceLang: actualSourceLang,
         targetLang,
       }).run();
 

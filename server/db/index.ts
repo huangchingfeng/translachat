@@ -8,7 +8,7 @@ import bcrypt from 'bcryptjs';
 import * as schema from './schema.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, '../../data');
+const dataDir = process.env.NODE_ENV === 'production' ? '/data' : path.join(__dirname, '../../data');
 
 // 確保 data 目錄存在
 fs.mkdirSync(dataDir, { recursive: true });
@@ -39,7 +39,7 @@ export function initTables() {
       host_id INTEGER NOT NULL REFERENCES hosts(id),
       label TEXT NOT NULL,
       guest_name TEXT,
-      guest_lang TEXT DEFAULT 'en',
+      guest_lang TEXT DEFAULT 'th',
       host_lang TEXT DEFAULT 'zh-TW',
       status TEXT DEFAULT 'active',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
