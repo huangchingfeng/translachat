@@ -30,6 +30,9 @@ export interface Message {
   translatedText: string | null;
   sourceLang: string;
   targetLang: string;
+  messageType: 'text' | 'image' | 'audio';
+  mediaUrl: string | null;
+  readAt: string | null;
   createdAt: string;
 }
 
@@ -78,7 +81,8 @@ export interface GuestRoomInfo {
 
 export interface ClientToServerEvents {
   'room:join': (data: { slug: string; role: 'host' | 'guest' }) => void;
-  'message:send': (data: { text: string; sourceLang: string }) => void;
+  'message:send': (data: { text: string; sourceLang: string; messageType?: string; mediaUrl?: string }) => void;
+  'message:read': (data: { messageIds: number[] }) => void;
   'language:change': (data: { lang: string }) => void;
   'typing:start': (data: { roomSlug: string }) => void;
   'typing:stop': (data: { roomSlug: string }) => void;
@@ -89,6 +93,7 @@ export interface ServerToClientEvents {
   'room:joined': (data: { roomId: number; hostLang: string; guestLang: string }) => void;
   'message:new': (data: Message) => void;
   'message:error': (data: { error: string }) => void;
+  'message:read-ack': (data: { messageIds: number[]; readAt: string }) => void;
   'typing:indicator': (data: { sender: 'host' | 'guest'; isTyping: boolean }) => void;
   'host:typing': (data: { isTyping: boolean }) => void;
   'guest:typing': (data: { isTyping: boolean }) => void;

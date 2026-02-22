@@ -54,9 +54,25 @@ export function initTables() {
       translated_text TEXT,
       source_lang TEXT NOT NULL,
       target_lang TEXT NOT NULL,
+      message_type TEXT DEFAULT 'text',
+      media_url TEXT,
+      read_at TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- 遷移：為已存在的資料表加入新欄位（安全的 ALTER TABLE）
+    -- SQLite 不支援 IF NOT EXISTS 在 ALTER TABLE，需 try-catch 處理
+  `);
+
+  // 安全加入新欄位（已存在則忽略）
+  const safeAddColumn = (table: string, col: string, type: string) => {
+    try { sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`); } catch {}
+  };
+  safeAddColumn('messages', 'message_type', "TEXT DEFAULT 'text'");
+  safeAddColumn('messages', 'media_url', 'TEXT');
+  safeAddColumn('messages', 'read_at', 'TEXT');
+
+  sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id);
     CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
     CREATE INDEX IF NOT EXISTS idx_rooms_host_id ON rooms(host_id);

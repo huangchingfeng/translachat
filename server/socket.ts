@@ -131,15 +131,19 @@ export function setupSocket(httpServer: any): void {
       }
     });
 
-    // === message:send ===
-    socket.on('message:send', async ({ text, sourceLang }) => {
+    // === message:send（支援 text / image / audio）===
+    socket.on('message:send', async ({ text, sourceLang, messageType, mediaUrl }) => {
       const info = socketRooms.get(socket.id);
       if (!info) return;
 
-      // 訊息長度限制
-      if (!text || text.length > MAX_MESSAGE_LENGTH) {
-        socket.emit('message:error', { error: `訊息長度不得超過 ${MAX_MESSAGE_LENGTH} 字元` });
-        return;
+      const type = messageType || 'text';
+
+      // 圖片/語音訊息不需要 text 驗證
+      if (type === 'text') {
+        if (!text || text.length > MAX_MESSAGE_LENGTH) {
+          socket.emit('message:error', { error: `訊息長度不得超過 ${MAX_MESSAGE_LENGTH} 字元` });
+          return;
+        }
       }
 
       // 速率限制
@@ -159,17 +163,24 @@ export function setupSocket(httpServer: any): void {
         const actualSourceLang = sourceLang || (role === 'host' ? (room.hostLang || 'zh-TW') : (room.guestLang || 'th'));
         const targetLang = role === 'host' ? (room.guestLang || 'th') : (room.hostLang || 'zh-TW');
 
-        // 翻譯
-        const translatedText = await translate(text, actualSourceLang, targetLang);
+        // 圖片/語音不需翻譯，文字才需要
+        let translatedText: string | null = null;
+        const msgText = text || (type === 'image' ? '📷 圖片' : '🎤 語音訊息');
+
+        if (type === 'text' && text) {
+          translatedText = await translate(text, actualSourceLang, targetLang);
+        }
 
         // 寫入資料庫
         const result = db.insert(messages).values({
           roomId: room.id,
           sender: role,
-          originalText: text,
+          originalText: msgText,
           translatedText,
           sourceLang: actualSourceLang,
           targetLang,
+          messageType: type,
+          mediaUrl: mediaUrl || null,
         }).run();
 
         // 更新房間 updatedAt
@@ -206,6 +217,28 @@ export function setupSocket(httpServer: any): void {
       } catch (error) {
         console.error('[Socket] guest:setName error:', error);
         socket.emit('message:error', { error: '設定名稱失敗' });
+      }
+    });
+
+    // === message:read（已讀回執）===
+    socket.on('message:read', ({ messageIds }) => {
+      const info = socketRooms.get(socket.id);
+      if (!info) return;
+
+      const { slug } = info;
+      const now = new Date().toISOString();
+
+      try {
+        for (const id of messageIds) {
+          db.update(messages)
+            .set({ readAt: now })
+            .where(eq(messages.id, id))
+            .run();
+        }
+        // 通知對方訊息已讀
+        socket.to(slug).emit('message:read-ack', { messageIds, readAt: now });
+      } catch (error) {
+        console.error('[Socket] message:read error:', error);
       }
     });
 

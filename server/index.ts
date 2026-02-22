@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import authRouter from './routes/auth.js';
 import roomsRouter from './routes/rooms.js';
 import chatRouter from './routes/chat.js';
+import uploadRouter from './routes/upload.js';
 import { setupSocket } from './socket.js';
 import { initDB } from './db/index.js';
 
@@ -41,10 +42,15 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// 靜態檔案：上傳的圖片/語音
+const dataDir = process.env.DATA_DIR || path.join(__dirname, '../data');
+app.use('/uploads', express.static(path.join(dataDir, 'uploads')));
+
 // API Routes
 app.use('/api/auth', authRouter);
 app.use('/api/rooms', roomsRouter);
 app.use('/api/chat', chatRouter);
+app.use('/api/upload', uploadRouter);
 
 // Production: 靜態檔案 & SPA fallback（排除 /api/ 路徑）
 if (process.env.NODE_ENV === 'production') {

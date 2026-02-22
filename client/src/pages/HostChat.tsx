@@ -196,6 +196,16 @@ const QUICK_PHRASES = [
   },
 ];
 
+// Emoji 面板分類
+const EMOJI_CATEGORIES = [
+  { label: '😀 表情', emojis: ['😀','😂','🤣','😍','🥰','😘','😊','😎','🤩','😏','🥺','😢','😤','😱'] },
+  { label: '❤️ 愛心', emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','💕','💗','💓','💘','💝','💖'] },
+  { label: '👋 手勢', emojis: ['👋','👍','👎','🤝','🙏','✌️','🤞','🤟','🤘','👏','🤙','💪','🫶'] },
+  { label: '🎉 慶祝', emojis: ['🎉','🎊','🥳','🎈','🎁','🎀','🎆','🎇','✨','🌟','⭐','💫','🔥'] },
+  { label: '🍔 食物', emojis: ['🍔','🍕','🍜','🍣','🍺','🍻','🥂','🧋','🍰','🍿','🥤','🍷','🍸'] },
+  { label: '⚽ 運動', emojis: ['⚽','🏀','🏈','⚾','🎾','🏐','🏓','🎱','🏊','🚴','💃','🕺','🎮'] },
+];
+
 export default function HostChat() {
   const navigate = useNavigate();
   const { roomId } = useParams<{ roomId: string }>();
@@ -215,11 +225,46 @@ export default function HostChat() {
   const [showPhrases, setShowPhrases] = useState(false);
   const [activeCategory, setActiveCategory] = useState(0);
 
+  // === 新增 state ===
+  const [muted, setMuted] = useState(false);
+  const [guestCount, setGuestCount] = useState(0);
+  const [showEmojis, setShowEmojis] = useState(false);
+  const [emojiCategory, setEmojiCategory] = useState(0);
+  const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [voiceDuration, setVoiceDuration] = useState(0);
+  const [uploading, setUploading] = useState(false);
+
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const micPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const micPressStartRef = useRef<number>(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // === 通知音效 ===
+  const playNotificationSound = useCallback(() => {
+    if (muted) return;
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 800;
+      gain.gain.value = 0.3;
+      osc.start();
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+      osc.stop(ctx.currentTime + 0.3);
+    } catch {
+      // 忽略音效錯誤
+    }
+  }, [muted]);
 
   // 取得歷史訊息
   const fetchMessages = useCallback(async () => {
@@ -275,6 +320,13 @@ export default function HostChat() {
 
     socket.on('message:new', (msg: Message) => {
       setMessages((prev) => [...prev, msg]);
+
+      // 收到 guest 訊息時播放通知音效 + 標記已讀
+      if (msg.sender === 'guest') {
+        playNotificationSound();
+        // 標記已讀
+        socket.emit('message:read', { messageIds: [msg.id] });
+      }
     });
 
     socket.on('guest:online', (data: { isOnline: boolean }) => {
@@ -295,11 +347,23 @@ export default function HostChat() {
       setGuestTyping(data.isTyping);
     });
 
+    // === 已讀回執 ===
+    socket.on('message:read-ack', (data: { messageIds: number[]; readAt: string }) => {
+      setMessages(prev => prev.map(m =>
+        data.messageIds.includes(m.id) ? { ...m, readAt: data.readAt } : m
+      ));
+    });
+
+    // === 多 Guest 人數 ===
+    socket.on('room:guest-count', (data: { count: number }) => {
+      setGuestCount(data.count);
+    });
+
     return () => {
       disconnectSocket();
       socketRef.current = null;
     };
-  }, [slug]);
+  }, [slug, playNotificationSound]);
 
   // 自動捲到底部
   useEffect(() => {
@@ -336,6 +400,17 @@ export default function HostChat() {
     if (!text) setInput('');
   };
 
+  // === 發送媒體訊息（圖片/語音） ===
+  const handleSendMedia = (mediaUrl: string, messageType: 'image' | 'audio') => {
+    if (!socketRef.current) return;
+    socketRef.current.emit('message:send', {
+      text: messageType === 'image' ? '[圖片]' : '[語音訊息]',
+      sourceLang: hostLang,
+      messageType,
+      mediaUrl,
+    });
+  };
+
   const handleQuickPhrase = (phrase: string) => {
     handleSend(phrase);
     setShowPhrases(false);
@@ -360,7 +435,115 @@ export default function HostChat() {
     }
   };
 
-  // 語音輸入
+  // === 圖片上傳 ===
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.url) {
+        handleSendMedia(data.url, 'image');
+      }
+    } catch {
+      alert('圖片上傳失敗');
+    } finally {
+      setUploading(false);
+      // 清除 file input，讓同一張圖可以重新選擇
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // === 語音訊息上傳 ===
+  const uploadAudio = async (blob: Blob) => {
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', blob, `voice-${Date.now()}.webm`);
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.url) {
+        handleSendMedia(data.url, 'audio');
+      }
+    } catch {
+      alert('語音上傳失敗');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // === 麥克風按鈕：短按 = 語音轉文字 / 長按 = 錄音 ===
+  const handleMicDown = () => {
+    micPressStartRef.current = Date.now();
+    micPressTimerRef.current = setTimeout(() => {
+      // 長按 > 500ms，開始錄音
+      startVoiceRecording();
+    }, 500);
+  };
+
+  const handleMicUp = () => {
+    const elapsed = Date.now() - micPressStartRef.current;
+    if (micPressTimerRef.current) {
+      clearTimeout(micPressTimerRef.current);
+      micPressTimerRef.current = null;
+    }
+
+    if (isVoiceRecording) {
+      // 結束錄音
+      stopVoiceRecording();
+    } else if (elapsed < 500) {
+      // 短按 -> 語音轉文字
+      toggleRecording();
+    }
+  };
+
+  const startVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        if (blob.size > 0) uploadAudio(blob);
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsVoiceRecording(true);
+      setVoiceDuration(0);
+
+      // 錄音計時器
+      voiceTimerRef.current = setInterval(() => {
+        setVoiceDuration(prev => prev + 1);
+      }, 1000);
+    } catch {
+      alert('無法存取麥克風');
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsVoiceRecording(false);
+    setVoiceDuration(0);
+    if (voiceTimerRef.current) {
+      clearInterval(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
+  };
+
+  // 語音轉文字（原有功能）
   const toggleRecording = () => {
     if (isRecording) {
       recognitionRef.current?.stop();
@@ -397,6 +580,13 @@ export default function HostChat() {
     setIsRecording(true);
   };
 
+  // 格式化錄音時長
+  const formatDuration = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div className="h-screen-safe flex flex-col bg-gray-950">
       {/* Header */}
@@ -419,11 +609,22 @@ export default function HostChat() {
                   <span className="text-xs text-gray-400">
                     {guestName || '等待訪客加入...'}
                     {guestName && (guestOnline ? ' - 在線' : ' - 離線')}
+                    {guestName && guestCount > 1 && (
+                      <span className="ml-1 text-purple-300">({guestCount}人)</span>
+                    )}
                   </span>
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {/* 靜音切換按鈕 */}
+              <button
+                onClick={() => setMuted(!muted)}
+                className="text-xs bg-gray-800 text-gray-400 hover:bg-gray-700 px-2.5 py-1.5 rounded-lg transition"
+                title={muted ? '開啟通知音效' : '關閉通知音效'}
+              >
+                {muted ? '🔕' : '🔔'}
+              </button>
               {slug && (
                 <button
                   onClick={handleCopyLink}
@@ -481,25 +682,47 @@ export default function HostChat() {
                       : 'bg-gray-800 text-gray-100 rounded-bl-md'
                   }`}
                 >
-                  <p className="text-sm leading-relaxed">
-                    {isHost
-                      ? msg.originalText
-                      : (msg.translatedText || msg.originalText)}
-                  </p>
-                  {!isHost && msg.translatedText && msg.originalText !== msg.translatedText && (
-                    <p className="text-xs mt-1 opacity-50">
-                      {getLanguageFlag(msg.sourceLang)} {msg.originalText}
-                    </p>
+                  {/* 圖片訊息 */}
+                  {msg.messageType === 'image' && msg.mediaUrl ? (
+                    <img
+                      src={msg.mediaUrl}
+                      alt="圖片"
+                      className="max-w-[200px] rounded-xl cursor-pointer"
+                      onClick={() => setFullscreenImage(msg.mediaUrl)}
+                    />
+                  ) : msg.messageType === 'audio' && msg.mediaUrl ? (
+                    /* 語音訊息 */
+                    <audio src={msg.mediaUrl} controls className="max-w-[200px]" />
+                  ) : (
+                    /* 文字訊息 */
+                    <>
+                      <p className="text-sm leading-relaxed">
+                        {isHost
+                          ? msg.originalText
+                          : (msg.translatedText || msg.originalText)}
+                      </p>
+                      {!isHost && msg.translatedText && msg.originalText !== msg.translatedText && (
+                        <p className="text-xs mt-1 opacity-50">
+                          {getLanguageFlag(msg.sourceLang)} {msg.originalText}
+                        </p>
+                      )}
+                      {isHost && msg.translatedText && msg.originalText !== msg.translatedText && (
+                        <p className="text-xs mt-1 opacity-70">
+                          {msg.translatedText}
+                        </p>
+                      )}
+                    </>
                   )}
-                  {isHost && msg.translatedText && msg.originalText !== msg.translatedText && (
-                    <p className="text-xs mt-1 opacity-70">
-                      {msg.translatedText}
-                    </p>
-                  )}
-                  <p className={`text-[10px] mt-1 text-right ${
+                  {/* 時間 + 已讀標記 */}
+                  <p className={`text-[10px] mt-1 text-right flex items-center justify-end gap-1 ${
                     isHost ? 'text-purple-300' : 'text-gray-500'
                   }`}>
                     {formatTime(msg.createdAt)}
+                    {isHost && (
+                      <span className={msg.readAt ? 'text-blue-400' : 'text-gray-500'}>
+                        {msg.readAt ? '✓✓' : '✓'}
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -519,6 +742,20 @@ export default function HostChat() {
           <div ref={messagesEndRef} />
         </div>
       </div>
+
+      {/* 圖片全螢幕查看 */}
+      {fullscreenImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center cursor-pointer"
+          onClick={() => setFullscreenImage(null)}
+        >
+          <img
+            src={fullscreenImage}
+            alt="全螢幕圖片"
+            className="max-w-[90vw] max-h-[90vh] object-contain"
+          />
+        </div>
+      )}
 
       {/* Quick Phrases Panel */}
       {showPhrases && (
@@ -556,12 +793,63 @@ export default function HostChat() {
         </div>
       )}
 
+      {/* Emoji 面板 */}
+      {showEmojis && (
+        <div className="bg-gray-900 border-t border-gray-800 flex-shrink-0 max-h-[35vh] overflow-hidden flex flex-col">
+          {/* Emoji Category Tabs */}
+          <div className="flex overflow-x-auto gap-1 px-3 pt-3 pb-2 flex-shrink-0 scrollbar-hide">
+            {EMOJI_CATEGORIES.map((cat, i) => (
+              <button
+                key={i}
+                onClick={() => setEmojiCategory(i)}
+                className={`whitespace-nowrap text-xs px-3 py-1.5 rounded-full transition ${
+                  emojiCategory === i
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+          {/* Emoji Grid */}
+          <div className="flex-1 overflow-y-auto px-3 pb-3">
+            <div className="flex flex-wrap gap-2">
+              {EMOJI_CATEGORIES[emojiCategory].emojis.map((emoji, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setInput(prev => prev + emoji);
+                  }}
+                  className="text-2xl hover:bg-gray-700 p-2 rounded-lg transition"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 上傳中提示 */}
+      {uploading && (
+        <div className="bg-gray-900 border-t border-gray-800 px-4 py-2 flex-shrink-0">
+          <div className="max-w-3xl mx-auto flex items-center gap-2 text-gray-400 text-sm">
+            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            上傳中...
+          </div>
+        </div>
+      )}
+
       {/* Input Bar */}
       <div className="bg-gray-900 border-t border-gray-800 flex-shrink-0 safe-area-bottom">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-2">
           {/* 快速話語切換 */}
           <button
-            onClick={() => setShowPhrases(!showPhrases)}
+            onClick={() => { setShowPhrases(!showPhrases); setShowEmojis(false); }}
             className={`p-2.5 rounded-full transition flex-shrink-0 ${
               showPhrases
                 ? 'bg-purple-600 text-white'
@@ -574,17 +862,65 @@ export default function HostChat() {
             </svg>
           </button>
 
+          {/* 圖片按鈕 */}
           <button
-            onClick={toggleRecording}
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2.5 rounded-full bg-gray-800 text-gray-400 hover:bg-gray-700 transition flex-shrink-0"
+            title="傳送圖片"
+          >
+            <span className="text-lg leading-none">📎</span>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleImageSelect}
+          />
+
+          {/* Emoji 按鈕 */}
+          <button
+            onClick={() => { setShowEmojis(!showEmojis); setShowPhrases(false); }}
             className={`p-2.5 rounded-full transition flex-shrink-0 ${
-              isRecording
-                ? 'bg-red-500 text-white animate-pulse'
+              showEmojis
+                ? 'bg-purple-600 text-white'
                 : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
             }`}
+            title="表情貼圖"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-            </svg>
+            <span className="text-lg leading-none">😀</span>
+          </button>
+
+          {/* 麥克風按鈕：短按語音轉文字 / 長按錄音 */}
+          <button
+            onMouseDown={handleMicDown}
+            onMouseUp={handleMicUp}
+            onMouseLeave={() => {
+              // 防止滑出按鈕時卡住
+              if (micPressTimerRef.current) {
+                clearTimeout(micPressTimerRef.current);
+                micPressTimerRef.current = null;
+              }
+              if (isVoiceRecording) stopVoiceRecording();
+            }}
+            onTouchStart={handleMicDown}
+            onTouchEnd={handleMicUp}
+            className={`p-2.5 rounded-full transition flex-shrink-0 ${
+              isVoiceRecording
+                ? 'bg-red-600 text-white animate-pulse'
+                : isRecording
+                  ? 'bg-red-500 text-white animate-pulse'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+            title="短按: 語音轉文字 / 長按: 語音訊息"
+          >
+            {isVoiceRecording ? (
+              <span className="text-xs font-mono whitespace-nowrap">🔴 {formatDuration(voiceDuration)}</span>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+            )}
           </button>
 
           <input
