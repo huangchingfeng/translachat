@@ -6,7 +6,7 @@ import { createSocket, disconnectSocket } from '../lib/socket';
 import { SUPPORTED_LANGUAGES, getLanguageFlag, type Message } from '../../../shared/types';
 import type { RoomListItem } from '../../../shared/types';
 
-// 快速話語分類
+// 快速話語分類（共 130+ 句）
 const QUICK_PHRASES = [
   {
     category: '👋 打招呼',
@@ -16,6 +16,13 @@ const QUICK_PHRASES = [
       '我是從台灣來的',
       '你今天過得好嗎？',
       '你好漂亮',
+      '嗨，我能跟你聊聊嗎？',
+      '你一個人嗎？',
+      '很開心在這裡遇見你',
+      '你住在這附近嗎？',
+      '我第一次來這裡',
+      '你來這裡多久了？',
+      '你會說英文嗎？',
     ],
   },
   {
@@ -26,6 +33,13 @@ const QUICK_PHRASES = [
       '你喜歡吃什麼？',
       '你有推薦的餐廳嗎？',
       '你會說中文嗎？',
+      '你最喜歡什麼音樂？',
+      '你有去過台灣嗎？',
+      '你做什麼工作？',
+      '你最喜歡哪個季節？',
+      '你喜歡旅行嗎？',
+      '你有什麼興趣愛好？',
+      '你最近在追什麼劇？',
     ],
   },
   {
@@ -36,6 +50,16 @@ const QUICK_PHRASES = [
       '跟你聊天很開心',
       '你是我今晚見過最漂亮的人',
       '你好可愛',
+      '你穿這件衣服很好看',
+      '你的聲音好好聽',
+      '你笑起來好甜',
+      '你的身材好好',
+      '你皮膚好好，怎麼保養的？',
+      '你好有氣質',
+      '你跳舞跳得好好',
+      '你的髮型好漂亮',
+      '你真的好美，像明星一樣',
+      '我喜歡你的風格',
     ],
   },
   {
@@ -47,17 +71,82 @@ const QUICK_PHRASES = [
       '我可以加你的 LINE 嗎？',
       '明天有空嗎？想約你出去',
       '我們可以交換電話號碼嗎？',
+      '要不要一起去看電影？',
+      '我想帶你去一個很棒的地方',
+      '下次可以約你出去嗎？',
+      '你明天有什麼計畫？',
+      '週末要不要一起吃飯？',
+      '我可以請你吃飯嗎？',
+      '要不要去唱歌？',
+      '我想請你去吃好吃的',
+      '你喜歡去哪裡玩？我帶你去',
     ],
   },
   {
     category: '🥰 撩',
     phrases: [
+      // 初次心動
       '遇見你是今晚最棒的事',
+      '看到你的第一眼我就心動了',
       '你讓我的心跳加速了',
       '我覺得我們很有緣',
-      '你的聲音好好聽',
-      '我想多了解你',
       '你是不是天使？怎麼從天上掉下來的',
+      '你是不是偷了我的心？因為我找不到了',
+      '你讓我相信一見鍾情',
+      '我從進來就一直在看你',
+      '你是我來這裡最大的驚喜',
+      '認識你讓我覺得好幸運',
+      // 讚美撩人
+      '你的眼睛像星星一樣閃亮',
+      '你的笑容是我今晚最美的風景',
+      '你笑的時候整個世界都亮了',
+      '你的美讓我說不出話',
+      '你比照片還要美一百倍',
+      '你知道你有多迷人嗎？',
+      '你的一舉一動都讓我著迷',
+      '你的嘴唇好漂亮',
+      '你的香味好好聞',
+      '你讓我忍不住一直看你',
+      // 甜蜜告白
+      '我覺得你是我的命中注定',
+      '你是我見過最特別的女生',
+      '我的眼裡只有你',
+      '你是上天送給我的禮物',
+      '你是我夢中的女孩',
+      '你讓我又相信愛情了',
+      '你是讓我心動的唯一',
+      '我想做你身邊最特別的人',
+      '做我女朋友好不好？',
+      '我想當你的專屬男朋友',
+      // 想靠近
+      '我想多了解你',
+      '我可以靠近你一點嗎？',
+      '我可以牽你的手嗎？',
+      '我可以抱抱你嗎？',
+      '我可以親你的臉嗎？',
+      '你讓我好想保護你',
+      '跟你在一起我好放鬆',
+      '你讓我的心融化了',
+      '你住在我心裡了，不許搬走',
+      '我已經離不開你了',
+      // 浪漫情話
+      '今晚月色真美',
+      '我希望時間可以停在這一刻',
+      '跟你在一起的時間過得好快',
+      '我想記住今晚跟你的每個瞬間',
+      '我想把最好的都給你',
+      '你讓我忘記了所有煩惱',
+      '我想每天都能看到你的笑容',
+      '遇見你之後我就不想看別人了',
+      '如果可以，我想跟你待到天亮',
+      '我不想跟你說再見',
+      // 深情款款
+      '你是我最想帶回家的那個人',
+      '如果世界末日我想跟你一起',
+      '我願意為你學泰語',
+      '我想用一輩子來認識你',
+      '你是我今晚的專屬天使',
+      '我每天都想來見你',
     ],
   },
   {
@@ -69,6 +158,40 @@ const QUICK_PHRASES = [
       '要不要跳舞？',
       '我可以坐你旁邊嗎？',
       '時間過得好快，捨不得離開',
+      '你想喝什麼酒？我請你',
+      '今晚你最美',
+      '來，乾杯！',
+      '這首歌好好聽，你喜歡嗎？',
+      '你跳舞的樣子好性感',
+      '我們一起自拍好嗎？',
+      '今晚不想回家了',
+      '你想去哪裡續攤？',
+      '這是我的 LINE，隨時聯絡我',
+      '你喜歡喝什麼？甜的還是烈的？',
+      '可以跟你拍張照嗎？',
+      '你今晚幾點下班？',
+      '等你下班，我在外面等你好不好？',
+      '再待一下嘛，不要走',
+    ],
+  },
+  {
+    category: '💕 關心',
+    phrases: [
+      '你累不累？要不要休息一下？',
+      '你吃飯了嗎？',
+      '要注意身體，不要太累',
+      '有什麼需要幫忙的嗎？',
+      '你今天開心嗎？',
+      '如果不舒服就不要勉強',
+      '路上小心',
+      '想你了',
+      '到家了嗎？',
+      '晚安，做個好夢',
+      '早安，今天也要加油',
+      '天氣熱，多喝水',
+      '有空的時候跟我說',
+      '你的事就是我的事',
+      '不管發生什麼我都在',
     ],
   },
 ];
@@ -275,7 +398,7 @@ export default function HostChat() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-950">
+    <div className="h-screen-safe flex flex-col bg-gray-950">
       {/* Header */}
       <header className="bg-gray-900 border-b border-gray-800 flex-shrink-0">
         <div className="max-w-3xl mx-auto px-4 py-3">
@@ -337,10 +460,10 @@ export default function HostChat() {
       </header>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4 min-h-0">
         <div className="max-w-3xl mx-auto space-y-3">
           {messages.length === 0 && (
-            <p className="text-center text-gray-600 text-sm py-10">
+            <p className="text-center text-gray-500 text-sm py-10">
               還沒有訊息，開始聊天吧
             </p>
           )}
@@ -399,7 +522,7 @@ export default function HostChat() {
 
       {/* Quick Phrases Panel */}
       {showPhrases && (
-        <div className="bg-gray-900 border-t border-gray-800 flex-shrink-0 max-h-[45vh] overflow-hidden flex flex-col">
+        <div className="bg-gray-900 border-t border-gray-800 flex-shrink-0 max-h-[40vh] overflow-hidden flex flex-col">
           {/* Category Tabs */}
           <div className="flex overflow-x-auto gap-1 px-3 pt-3 pb-2 flex-shrink-0 scrollbar-hide">
             {QUICK_PHRASES.map((cat, i) => (

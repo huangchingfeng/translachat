@@ -92,3 +92,18 @@ body {
 .safe-area-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
+
+/* Dynamic viewport height (fixes mobile browser chrome issue) */
+.h-screen-safe {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Hide scrollbar */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
