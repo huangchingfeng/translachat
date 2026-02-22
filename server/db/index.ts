@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { count } from 'drizzle-orm';
+import { count, eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import * as schema from './schema.js';
 
@@ -64,16 +64,27 @@ export function initTables() {
   `);
 }
 
-// 建立預設 host 帳號
+// 建立或更新預設 host 帳號
 export async function seedHost() {
-  const result = db.select({ value: count() }).from(schema.hosts).get();
-  if (result && result.value > 0) return;
-
   const email = process.env.HOST_EMAIL || 'admin@translachat.com';
   const password = process.env.HOST_PASSWORD || 'changeme';
   const name = process.env.HOST_NAME || 'Host';
 
   const hashedPassword = await bcrypt.hash(password, 10);
+
+  const result = db.select({ value: count() }).from(schema.hosts).get();
+  if (result && result.value > 0) {
+    // 更新第一個 host 帳號，確保與環境變數同步
+    const firstHost = db.select().from(schema.hosts).get();
+    if (firstHost && firstHost.email !== email) {
+      db.update(schema.hosts)
+        .set({ email, password: hashedPassword, name })
+        .where(eq(schema.hosts.id, firstHost.id))
+        .run();
+      console.log(`[DB] Updated host: ${email}`);
+    }
+    return;
+  }
 
   db.insert(schema.hosts).values({
     email,
