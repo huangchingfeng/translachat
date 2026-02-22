@@ -1,5 +1,7 @@
 FROM node:22-slim AS builder
 
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY package*.json ./
@@ -8,20 +10,20 @@ RUN npm ci
 COPY . .
 RUN npx vite build
 
+# 重新安裝只保留 production deps + tsx
+RUN rm -rf node_modules && npm ci --omit=dev && npm install tsx
+
 # --- Production ---
 FROM node:22-slim
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci --omit=dev && npm install tsx
-
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist/client ./dist/client
+COPY --from=builder /app/package.json ./
 COPY server ./server
 COPY shared ./shared
-COPY .env.example .env.example
 
-# 資料目錄（掛載持久化磁碟）
 RUN mkdir -p /data
 
 ENV NODE_ENV=production

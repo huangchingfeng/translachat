@@ -1,10 +1,8 @@
 services:
   - type: web
     name: translachat
-    runtime: node
+    runtime: docker
     plan: free
-    buildCommand: npm install && npx vite build
-    startCommand: npx tsx server/index.ts
     envVars:
       - key: NODE_ENV
         value: production
