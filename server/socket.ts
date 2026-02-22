@@ -122,6 +122,19 @@ export function setupSocket(httpServer: any): void {
       }
     });
 
+    // === guest:setName ===
+    socket.on('guest:setName', async ({ name }) => {
+      const info = socketRooms.get(socket.id);
+      if (!info || info.role !== 'guest') return;
+
+      db.update(rooms)
+        .set({ guestName: name, updatedAt: new Date().toISOString() })
+        .where(eq(rooms.slug, info.slug))
+        .run();
+
+      console.log(`[Socket] Guest set name: ${name} in room ${info.slug}`);
+    });
+
     // === language:change ===
     socket.on('language:change', async ({ lang }) => {
       const info = socketRooms.get(socket.id);
@@ -145,7 +158,7 @@ export function setupSocket(httpServer: any): void {
       const info = socketRooms.get(socket.id);
       if (!info) return;
 
-      socket.to(info.slug).emit('typing:indicator', { sender: info.role });
+      socket.to(info.slug).emit('typing:indicator', { sender: info.role, isTyping: true });
     });
 
     // === typing:stop ===
@@ -153,7 +166,7 @@ export function setupSocket(httpServer: any): void {
       const info = socketRooms.get(socket.id);
       if (!info) return;
 
-      socket.to(info.slug).emit('typing:indicator', { sender: info.role });
+      socket.to(info.slug).emit('typing:indicator', { sender: info.role, isTyping: false });
     });
 
     // === disconnect ===

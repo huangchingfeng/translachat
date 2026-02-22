@@ -118,11 +118,13 @@ export default function GuestChat() {
           });
         });
 
-        socket.on('typing:indicator', (data: { sender: 'host' | 'guest' }) => {
+        socket.on('typing:indicator', (data: { sender: 'host' | 'guest'; isTyping?: boolean }) => {
           if (data.sender === 'host') {
-            setIsTyping(true);
+            setIsTyping(data.isTyping !== false);
             if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-            typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+            if (data.isTyping !== false) {
+              typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+            }
           }
         });
 

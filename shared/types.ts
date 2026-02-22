@@ -50,8 +50,7 @@ export interface CreateRoomRequest {
   hostLang?: string;
 }
 
-export interface CreateRoomResponse {
-  room: Room;
+export interface CreateRoomResponse extends Room {
   chatUrl: string;
 }
 
@@ -63,9 +62,8 @@ export interface RoomListItem {
   guestLang: string;
   hostLang: string;
   status: 'active' | 'archived';
-  lastMessage: string | null;
-  lastMessageAt: string | null;
-  unreadCount: number;
+  chatUrl: string;
+  lastMessage: Message | null;
 }
 
 export interface GuestRoomInfo {
@@ -73,6 +71,7 @@ export interface GuestRoomInfo {
   hostName: string;
   guestName: string | null;
   guestLang: string;
+  hostLang: string;
 }
 
 // ===== WebSocket Events =====
@@ -90,7 +89,7 @@ export interface ServerToClientEvents {
   'room:joined': (data: { roomId: number; hostLang: string; guestLang: string }) => void;
   'message:new': (data: Message) => void;
   'message:error': (data: { error: string }) => void;
-  'typing:indicator': (data: { sender: 'host' | 'guest' }) => void;
+  'typing:indicator': (data: { sender: 'host' | 'guest'; isTyping: boolean }) => void;
   'guest:online': (data: { isOnline: boolean }) => void;
   'language:changed': (data: { lang: string; role: 'host' | 'guest' }) => void;
 }

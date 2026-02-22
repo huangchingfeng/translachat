@@ -196,7 +196,9 @@ export default function Dashboard() {
                     {room.guestName || '等待加入...'}
                   </p>
                   {room.lastMessage && (
-                    <p className="text-xs text-gray-400 mt-2 truncate">{room.lastMessage}</p>
+                    <p className="text-xs text-gray-400 mt-2 truncate">
+                      {typeof room.lastMessage === 'string' ? room.lastMessage : room.lastMessage.originalText}
+                    </p>
                   )}
                 </div>
                 <div className="flex border-t border-gray-100">
