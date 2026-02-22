@@ -24,7 +24,7 @@ router.get('/:slug', (req, res) => {
     .get();
 
   if (!room || room.status === 'archived') {
-    return res.status(404).json({ message: '聊天室不存在或已關閉' });
+    return res.status(404).json({ error: '聊天室不存在或已關閉' });
   }
 
   return res.json({
@@ -44,7 +44,7 @@ router.patch('/:slug/guest', (req, res) => {
   const room = db.select().from(rooms).where(eq(rooms.slug, slug)).get();
 
   if (!room) {
-    return res.status(404).json({ message: '聊天室不存在' });
+    return res.status(404).json({ error: '聊天室不存在' });
   }
 
   const updates: Record<string, unknown> = {
@@ -87,7 +87,7 @@ router.get('/:slug/messages', (req, res) => {
   const room = db.select().from(rooms).where(eq(rooms.slug, slug)).get();
 
   if (!room) {
-    return res.status(404).json({ message: '聊天室不存在' });
+    return res.status(404).json({ error: '聊天室不存在' });
   }
 
   const conditions = [eq(messages.roomId, room.id)];

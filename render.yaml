@@ -5,6 +5,7 @@ services:
     plan: free
     buildCommand: npm install --include=dev && npx vite build
     startCommand: npx tsx server/index.ts
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
@@ -17,4 +18,6 @@ services:
       - key: HOST_PASSWORD
         sync: false
       - key: HOST_NAME
+        sync: false
+      - key: ALLOWED_ORIGINS
         sync: false

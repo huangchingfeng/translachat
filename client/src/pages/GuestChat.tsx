@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type FormEvent, type ChangeEvent } from 'react';
 import { useParams } from 'react-router-dom';
-import { io, type Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
+import { createSocket, disconnectSocket } from '../lib/socket';
 import { SUPPORTED_LANGUAGES, UI_TRANSLATIONS, type Message } from '../../../shared/types';
 
 // SpeechRecognition type
@@ -31,7 +32,7 @@ export default function GuestChat() {
   const [selectedLang, setSelectedLang] = useState('');
   const [langSelected, setLangSelected] = useState(false);
   const [hostName, setHostName] = useState('');
-  const [isConnected, setIsConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'reconnecting' | 'disconnected'>('disconnected');
   const [isRecording, setIsRecording] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [guestName, setGuestName] = useState('');
@@ -45,6 +46,7 @@ export default function GuestChat() {
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roomDataRef = useRef<{ hostName: string; guestName: string | null; guestLang: string } | null>(null);
 
   const hasSpeechRecognition = typeof window !== 'undefined' &&
@@ -65,8 +67,6 @@ export default function GuestChat() {
   // Language selected -> fetch room info and connect socket
   useEffect(() => {
     if (!slug || !langSelected) return;
-
-    let socket: Socket;
 
     const init = async () => {
       setLoading(true);
@@ -96,24 +96,26 @@ export default function GuestChat() {
 
         setLoading(false);
 
-        // Connect socket
-        socket = io(window.location.origin);
+        // Connect socket with roomSlug auth
+        const socket = createSocket({ roomSlug: slug });
         socketRef.current = socket;
 
         socket.on('connect', () => {
-          setIsConnected(true);
+          setConnectionStatus('connected');
           socket.emit('room:join', { slug, role: 'guest' });
-          // Notify server of language choice
           socket.emit('language:change', { lang: selectedLang });
         });
 
         socket.on('disconnect', () => {
-          setIsConnected(false);
+          setConnectionStatus('disconnected');
+        });
+
+        socket.io.on('reconnect_attempt', () => {
+          setConnectionStatus('reconnecting');
         });
 
         socket.on('message:new', (msg: Message) => {
           setMessages(prev => {
-            // Replace optimistic message if it matches
             const optimisticIdx = prev.findIndex(
               m => m.id < 0 && m.originalText === msg.originalText && m.sender === msg.sender
             );
@@ -126,13 +128,19 @@ export default function GuestChat() {
           });
         });
 
+        // Listen to both typing events for compatibility
+        const handleHostTyping = (data: { isTyping: boolean }) => {
+          setIsTyping(data.isTyping);
+          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+          if (data.isTyping) {
+            typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
+          }
+        };
+
+        socket.on('host:typing', handleHostTyping);
         socket.on('typing:indicator', (data: { sender: 'host' | 'guest'; isTyping?: boolean }) => {
           if (data.sender === 'host') {
-            setIsTyping(data.isTyping !== false);
-            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-            if (data.isTyping !== false) {
-              typingTimeoutRef.current = setTimeout(() => setIsTyping(false), 3000);
-            }
+            handleHostTyping({ isTyping: data.isTyping !== false });
           }
         });
 
@@ -150,12 +158,10 @@ export default function GuestChat() {
     init();
 
     return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
+      disconnectSocket();
+      socketRef.current = null;
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (typingStopTimeoutRef.current) clearTimeout(typingStopTimeoutRef.current);
     };
   }, [slug, langSelected]);
 
@@ -241,10 +247,16 @@ export default function GuestChat() {
     setIsRecording(true);
   };
 
-  // Typing indicator
+  // Typing indicator with debounced stop
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     setInputText(e.target.value);
-    socketRef.current?.emit('typing:start');
+    if (slug) {
+      socketRef.current?.emit('typing:start', { roomSlug: slug });
+      if (typingStopTimeoutRef.current) clearTimeout(typingStopTimeoutRef.current);
+      typingStopTimeoutRef.current = setTimeout(() => {
+        socketRef.current?.emit('typing:stop', { roomSlug: slug });
+      }, 1000);
+    }
   };
 
   // === Language Selection Page ===
@@ -311,8 +323,12 @@ export default function GuestChat() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`inline-block w-2 h-2 rounded-full ${isConnected ? 'bg-green-300' : 'bg-red-400'}`} />
-            <span className="text-xs text-blue-200">{isConnected ? t('online') : t('offline')}</span>
+            <span className={`inline-block w-2 h-2 rounded-full ${
+              connectionStatus === 'connected' ? 'bg-green-300' :
+              connectionStatus === 'reconnecting' ? 'bg-yellow-300 animate-pulse' :
+              'bg-red-400'
+            }`} />
+            <span className="text-xs text-blue-200">{t(connectionStatus)}</span>
           </div>
         </div>
       </header>
@@ -412,11 +428,14 @@ export default function GuestChat() {
         {/* Typing indicator */}
         {isTyping && (
           <div className="flex justify-start">
-            <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
-              <div className="flex gap-1">
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-2.5">
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1">
+                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+                <span className="text-xs text-gray-400">{t('typing')}</span>
               </div>
             </div>
           </div>

@@ -18,7 +18,7 @@ declare global {
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: '未授權，請重新登入' });
+    return res.status(401).json({ error: '未授權，請重新登入' });
   }
 
   const token = authHeader.split(' ')[1];
@@ -28,6 +28,6 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
     req.authUser = { id: decoded.id, email: decoded.email, name: decoded.name };
     next();
   } catch {
-    return res.status(401).json({ message: '未授權，請重新登入' });
+    return res.status(401).json({ error: '未授權，請重新登入' });
   }
 }

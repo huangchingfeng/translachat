@@ -56,6 +56,11 @@ export function initTables() {
       target_lang TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
+    CREATE INDEX IF NOT EXISTS idx_rooms_host_id ON rooms(host_id);
+    CREATE INDEX IF NOT EXISTS idx_rooms_slug ON rooms(slug);
   `);
 }
 

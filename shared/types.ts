@@ -80,8 +80,8 @@ export interface ClientToServerEvents {
   'room:join': (data: { slug: string; role: 'host' | 'guest' }) => void;
   'message:send': (data: { text: string; sourceLang: string }) => void;
   'language:change': (data: { lang: string }) => void;
-  'typing:start': () => void;
-  'typing:stop': () => void;
+  'typing:start': (data: { roomSlug: string }) => void;
+  'typing:stop': (data: { roomSlug: string }) => void;
   'guest:setName': (data: { name: string }) => void;
 }
 
@@ -90,7 +90,12 @@ export interface ServerToClientEvents {
   'message:new': (data: Message) => void;
   'message:error': (data: { error: string }) => void;
   'typing:indicator': (data: { sender: 'host' | 'guest'; isTyping: boolean }) => void;
+  'host:typing': (data: { isTyping: boolean }) => void;
+  'guest:typing': (data: { isTyping: boolean }) => void;
   'guest:online': (data: { isOnline: boolean }) => void;
+  'user:online': (data: { role: string }) => void;
+  'user:offline': (data: { role: string }) => void;
+  'room:guest-count': (data: { count: number }) => void;
   'language:changed': (data: { lang: string; role: 'host' | 'guest' }) => void;
 }
 
@@ -129,6 +134,10 @@ export const UI_TRANSLATIONS: Record<string, Record<string, string>> = {
     loading: 'กำลังโหลด...',
     myLanguage: 'ภาษาของฉัน:',
     changeLang: 'เปลี่ยนภาษา',
+    connected: 'เชื่อมต่อแล้ว',
+    reconnecting: 'กำลังเชื่อมต่อใหม่',
+    disconnected: 'ตัดการเชื่อมต่อ',
+    typing: 'กำลังพิมพ์',
   },
   'vi': {
     selectLanguage: 'Chọn ngôn ngữ của bạn',
@@ -146,6 +155,10 @@ export const UI_TRANSLATIONS: Record<string, Record<string, string>> = {
     loading: 'Đang tải...',
     myLanguage: 'Ngôn ngữ:',
     changeLang: 'Đổi ngôn ngữ',
+    connected: 'Đã kết nối',
+    reconnecting: 'Đang kết nối lại',
+    disconnected: 'Đã ngắt kết nối',
+    typing: 'Đang nhập',
   },
   'ja': {
     selectLanguage: '言語を選択してください',
@@ -163,6 +176,10 @@ export const UI_TRANSLATIONS: Record<string, Record<string, string>> = {
     loading: '読み込み中...',
     myLanguage: '言語:',
     changeLang: '言語を変更',
+    connected: '接続済み',
+    reconnecting: '再接続中',
+    disconnected: '切断されました',
+    typing: '入力中',
   },
   'ko': {
     selectLanguage: '언어를 선택하세요',
@@ -180,6 +197,10 @@ export const UI_TRANSLATIONS: Record<string, Record<string, string>> = {
     loading: '로딩 중...',
     myLanguage: '언어:',
     changeLang: '언어 변경',
+    connected: '연결됨',
+    reconnecting: '재연결 중',
+    disconnected: '연결 끊김',
+    typing: '입력 중',
   },
   'zh-TW': {
     selectLanguage: '請選擇您的語言',
@@ -197,6 +218,10 @@ export const UI_TRANSLATIONS: Record<string, Record<string, string>> = {
     loading: '載入中...',
     myLanguage: '語言：',
     changeLang: '切換語言',
+    connected: '已連線',
+    reconnecting: '重新連線中',
+    disconnected: '已斷線',
+    typing: '正在輸入',
   },
 };
 

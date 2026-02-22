@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { io, Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
+import { api } from '../lib/api';
+import { createSocket, disconnectSocket } from '../lib/socket';
 import { SUPPORTED_LANGUAGES, getLanguageFlag, type Message } from '../../../shared/types';
+import type { RoomListItem } from '../../../shared/types';
 
 export default function HostChat() {
   const navigate = useNavigate();
@@ -17,68 +20,56 @@ export default function HostChat() {
   const [guestOnline, setGuestOnline] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [guestTyping, setGuestTyping] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
-
-  const token = localStorage.getItem('token');
-  const headers = {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  };
-
-  useEffect(() => {
-    if (!token) {
-      navigate('/login');
-    }
-  }, [token, navigate]);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingRef = useRef(false);
 
   // 取得歷史訊息
   const fetchMessages = useCallback(async () => {
     try {
-      const res = await fetch(`/api/rooms/${roomId}/messages`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(data.messages || data);
-      }
+      const data = await api.get<{ messages?: Message[] } | Message[]>(`/rooms/${roomId}/messages`);
+      const msgList = Array.isArray(data) ? data : (data.messages || []);
+      setMessages(msgList);
     } catch {
-      // ignore
+      // api.ts handles 401 redirect automatically
     }
   }, [roomId]);
 
   // 取得房間資訊
   useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token || !roomId) return;
+
     const fetchRoom = async () => {
       try {
-        const res = await fetch(`/api/rooms`, { headers });
-        if (res.ok) {
-          const data = await res.json();
-          const roomList = data.rooms || data;
-          const room = roomList.find((r: { id: number }) => r.id === Number(roomId));
-          if (room) {
-            setRoomLabel(room.label);
-            setGuestName(room.guestName || '');
-            setHostLang(room.hostLang || 'zh-TW');
-          }
+        const data = await api.get<{ rooms?: RoomListItem[] } | RoomListItem[]>('/rooms');
+        const roomList = Array.isArray(data) ? data : (data.rooms || []);
+        const room = roomList.find((r) => r.id === Number(roomId));
+        if (room) {
+          setRoomLabel(room.label);
+          setGuestName(room.guestName || '');
+          setHostLang(room.hostLang || 'zh-TW');
         }
       } catch {
         // ignore
       }
     };
-    if (token && roomId) {
-      fetchRoom();
-      fetchMessages();
-    }
-  }, [token, roomId, fetchMessages]);
+
+    fetchRoom();
+    fetchMessages();
+  }, [roomId, fetchMessages]);
 
   // Socket.io 連線
   useEffect(() => {
+    const token = localStorage.getItem('token');
     if (!token || !slug) return;
 
-    const socket: Socket = io({
-      auth: { token },
-    });
+    const socket = createSocket({ token });
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -108,23 +99,62 @@ export default function HostChat() {
       setHostLang(data.hostLang);
     });
 
+    socket.on('guest:typing', (data: { isTyping: boolean }) => {
+      setGuestTyping(data.isTyping);
+    });
+
     return () => {
-      socket.disconnect();
+      disconnectSocket();
       socketRef.current = null;
     };
-  }, [token, slug]);
+  }, [slug]);
 
   // 自動捲到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, guestTyping]);
+
+  const handleInputChange = (value: string) => {
+    setInput(value);
+    if (!socketRef.current || !slug) return;
+
+    if (!isTypingRef.current) {
+      isTypingRef.current = true;
+      socketRef.current.emit('typing:start', { roomSlug: slug });
+    }
+
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => {
+      isTypingRef.current = false;
+      socketRef.current?.emit('typing:stop', { roomSlug: slug });
+    }, 1000);
+  };
 
   const handleSend = () => {
     const text = input.trim();
     if (!text || !socketRef.current) return;
 
+    // 送出訊息時停止 typing 狀態
+    if (isTypingRef.current) {
+      isTypingRef.current = false;
+      socketRef.current.emit('typing:stop', { roomSlug: slug });
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    }
+
     socketRef.current.emit('message:send', { text, sourceLang: hostLang });
     setInput('');
+  };
+
+  const handleCopyLink = () => {
+    const url = `${window.location.origin}/chat/${slug}`;
+    navigator.clipboard.writeText(url);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
+
+  const formatTime = (dateStr: string) => {
+    const d = new Date(dateStr);
+    return d.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false });
   };
 
   const handleLanguageChange = (lang: string) => {
@@ -197,9 +227,22 @@ export default function HostChat() {
                 </div>
               </div>
             </div>
-            {!connected && (
-              <span className="text-xs text-orange-500 bg-orange-50 px-2 py-1 rounded">連線中...</span>
-            )}
+            <div className="flex items-center gap-2">
+              {slug && (
+                <button
+                  onClick={handleCopyLink}
+                  className="text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition flex items-center gap-1"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                  </svg>
+                  {linkCopied ? '已複製!' : '複製連結'}
+                </button>
+              )}
+              {!connected && (
+                <span className="text-xs text-orange-500 bg-orange-50 px-2 py-1 rounded">連線中...</span>
+              )}
+            </div>
           </div>
 
           {/* Language Selector */}
@@ -257,10 +300,26 @@ export default function HostChat() {
                       {msg.translatedText}
                     </p>
                   )}
+                  <p className={`text-[10px] mt-1 text-right ${
+                    isHost ? 'text-blue-200' : 'text-gray-400'
+                  }`}>
+                    {formatTime(msg.createdAt)}
+                  </p>
                 </div>
               </div>
             );
           })}
+          {guestTyping && (
+            <div className="flex justify-start">
+              <div className="bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3">
+                <div className="flex items-center gap-1">
+                  <span className="typing-dot w-2 h-2 bg-gray-400 rounded-full inline-block" />
+                  <span className="typing-dot w-2 h-2 bg-gray-400 rounded-full inline-block" />
+                  <span className="typing-dot w-2 h-2 bg-gray-400 rounded-full inline-block" />
+                </div>
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -284,7 +343,7 @@ export default function HostChat() {
           <input
             type="text"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleSend()}
             placeholder="輸入訊息..."
             className="flex-1 px-4 py-2.5 border border-gray-200 rounded-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"

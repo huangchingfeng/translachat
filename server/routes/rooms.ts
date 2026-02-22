@@ -1,11 +1,18 @@
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
+import { z } from 'zod';
 import { db } from '../db/index.js';
 import { rooms, messages } from '../db/schema.js';
-import { eq, desc, and, lt } from 'drizzle-orm';
+import { eq, desc, and, lt, sql } from 'drizzle-orm';
 import { authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
+
+const createRoomSchema = z.object({
+  label: z.string().min(1, 'Label is required').max(100),
+  guestLang: z.string().optional(),
+  hostLang: z.string().optional(),
+});
 
 // 所有路由都需要驗證
 router.use(authMiddleware);
@@ -14,6 +21,7 @@ router.use(authMiddleware);
 router.get('/', (req, res) => {
   const hostId = req.authUser!.id;
 
+  // 一次查出所有房間 + 最後一則訊息（避免 N+1）
   const allRooms = db
     .select()
     .from(rooms)
@@ -21,21 +29,31 @@ router.get('/', (req, res) => {
     .orderBy(desc(rooms.updatedAt))
     .all();
 
-  const result = allRooms.map((room) => {
-    const lastMessage = db
-      .select()
-      .from(messages)
-      .where(eq(messages.roomId, room.id))
-      .orderBy(desc(messages.createdAt))
-      .limit(1)
-      .get();
+  if (allRooms.length === 0) {
+    return res.json([]);
+  }
 
-    return {
-      ...room,
-      chatUrl: `/chat/${room.slug}`,
-      lastMessage: lastMessage || null,
-    };
-  });
+  const roomIds = allRooms.map((r) => r.id);
+
+  // 用 subquery 一次取得每個房間的最後一則訊息
+  const lastMessages = db
+    .select()
+    .from(messages)
+    .where(
+      sql`${messages.id} IN (
+        SELECT MAX(id) FROM messages WHERE room_id IN (${sql.join(roomIds.map(id => sql`${id}`), sql`, `)})
+        GROUP BY room_id
+      )`
+    )
+    .all();
+
+  const lastMessageMap = new Map(lastMessages.map((m) => [m.roomId, m]));
+
+  const result = allRooms.map((room) => ({
+    ...room,
+    chatUrl: `/chat/${room.slug}`,
+    lastMessage: lastMessageMap.get(room.id) || null,
+  }));
 
   return res.json(result);
 });
@@ -43,12 +61,13 @@ router.get('/', (req, res) => {
 // POST / - 建立新房間
 router.post('/', (req, res) => {
   const hostId = req.authUser!.id;
-  const { label, hostLang } = req.body;
 
-  if (!label) {
-    return res.status(400).json({ message: '請提供房間名稱' });
+  const parsed = createRoomSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0].message });
   }
 
+  const { label, hostLang } = parsed.data;
   const slug = nanoid(12);
 
   const result = db
@@ -81,7 +100,7 @@ router.patch('/:id', (req, res) => {
     .get();
 
   if (!room) {
-    return res.status(404).json({ message: '找不到此房間' });
+    return res.status(404).json({ error: '找不到此房間' });
   }
 
   const updates: Record<string, string> = {};
@@ -110,7 +129,7 @@ router.delete('/:id', (req, res) => {
     .get();
 
   if (!room) {
-    return res.status(404).json({ message: '找不到此房間' });
+    return res.status(404).json({ error: '找不到此房間' });
   }
 
   // 先刪訊息，再刪房間
@@ -134,7 +153,7 @@ router.get('/:id/messages', (req, res) => {
     .get();
 
   if (!room) {
-    return res.status(404).json({ message: '找不到此房間' });
+    return res.status(404).json({ error: '找不到此房間' });
   }
 
   const conditions = [eq(messages.roomId, roomId)];

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../lib/api';
 import type { RoomListItem } from '../../../shared/types';
 
 export default function Dashboard() {
@@ -12,61 +13,42 @@ export default function Dashboard() {
   const [toast, setToast] = useState('');
   const [hostName, setHostName] = useState('Host');
 
-  const token = localStorage.getItem('token');
-  const headers = {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  };
-
   useEffect(() => {
-    if (!token) {
-      navigate('/login');
-      return;
-    }
-    // 從 token 解析 host name
+    // 從 token 解析 host name (PrivateRoute 已確保 token 存在)
+    const token = localStorage.getItem('token');
+    if (!token) return;
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
       if (payload.name) setHostName(payload.name);
     } catch {
       // ignore
     }
-  }, [token, navigate]);
+  }, []);
 
   const fetchRooms = useCallback(async () => {
     try {
-      const res = await fetch('/api/rooms', { headers });
-      if (res.status === 401) {
-        localStorage.removeItem('token');
-        navigate('/login');
-        return;
-      }
-      const data = await res.json();
-      setRooms(data.rooms || data);
+      const data = await api.get<{ rooms?: RoomListItem[] } | RoomListItem[]>('/rooms');
+      const roomList = Array.isArray(data) ? data : (data.rooms || []);
+      setRooms(roomList);
     } catch {
-      // ignore
+      // api.ts handles 401 redirect automatically
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (token) fetchRooms();
-  }, [token, fetchRooms]);
+    fetchRooms();
+  }, [fetchRooms]);
 
   const handleCreate = async () => {
     if (!newLabel.trim()) return;
     setCreating(true);
     try {
-      const res = await fetch('/api/rooms', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ label: newLabel.trim() }),
-      });
-      if (res.ok) {
-        setNewLabel('');
-        setShowForm(false);
-        fetchRooms();
-      }
+      await api.post('/rooms', { label: newLabel.trim() });
+      setNewLabel('');
+      setShowForm(false);
+      fetchRooms();
     } catch {
       // ignore
     } finally {
@@ -77,10 +59,7 @@ export default function Dashboard() {
   const handleDelete = async (roomId: number) => {
     if (!confirm('確定要刪除這個聊天室嗎？')) return;
     try {
-      await fetch(`/api/rooms/${roomId}`, {
-        method: 'DELETE',
-        headers,
-      });
+      await api.delete(`/rooms/${roomId}`);
       fetchRooms();
     } catch {
       // ignore

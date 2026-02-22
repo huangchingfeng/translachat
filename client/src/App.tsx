@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 
 const Login = lazy(() => import('./pages/Login'));
@@ -25,6 +25,14 @@ function NotFound() {
   );
 }
 
+function PrivateRoute({ children }: { children: ReactNode }) {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -32,8 +40,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/dashboard/chat/:roomId" element={<HostChat />} />
+          <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+          <Route path="/dashboard/chat/:roomId" element={<PrivateRoute><HostChat /></PrivateRoute>} />
           <Route path="/chat/:slug" element={<GuestChat />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
