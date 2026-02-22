@@ -8,7 +8,7 @@ import bcrypt from 'bcryptjs';
 import * as schema from './schema.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = process.env.NODE_ENV === 'production' ? '/data' : path.join(__dirname, '../../data');
+const dataDir = process.env.DATA_DIR || path.join(__dirname, '../../data');
 
 // 確保 data 目錄存在
 fs.mkdirSync(dataDir, { recursive: true });
