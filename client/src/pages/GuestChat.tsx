@@ -4,22 +4,6 @@ import type { Socket } from 'socket.io-client';
 import { createSocket, disconnectSocket } from '../lib/socket';
 import { SUPPORTED_LANGUAGES, UI_TRANSLATIONS, type Message } from '../../../shared/types';
 
-// SpeechRecognition type
-interface SpeechRecognitionEvent {
-  results: { [index: number]: { [index: number]: { transcript: string } } };
-}
-
-interface SpeechRecognitionInstance {
-  lang: string;
-  interimResults: boolean;
-  continuous: boolean;
-  start: () => void;
-  stop: () => void;
-  onresult: ((e: SpeechRecognitionEvent) => void) | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-}
-
 // Emoji 分類
 const EMOJI_CATEGORIES = [
   { label: '表情', emojis: '😀😂🤣😍🥰😘😊😎🤩😏🥺😢😤😱' },
@@ -73,7 +57,8 @@ export default function GuestChat() {
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const sttRecorderRef = useRef<MediaRecorder | null>(null);
+  const sttChunksRef = useRef<Blob[]>([]);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roomDataRef = useRef<{ hostName: string; guestName: string | null; guestLang: string } | null>(null);
@@ -84,8 +69,8 @@ export default function GuestChat() {
   const audioChunksRef = useRef<Blob[]>([]);
   const voiceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const hasSpeechRecognition = typeof window !== 'undefined' &&
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+  // Whisper 語音輸入：所有瀏覽器都支援 MediaRecorder
+  const hasVoiceInput = typeof window !== 'undefined' && !!navigator.mediaDevices;
 
   // i18n helper
   const t = (key: string) => UI_TRANSLATIONS[selectedLang]?.[key] || key;
@@ -451,39 +436,56 @@ export default function GuestChat() {
     }
   };
 
-  // Voice input (speech-to-text)
-  const toggleSpeechToText = () => {
-    if (isRecording && recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsRecording(false);
+  // Voice input (Whisper STT)
+  const toggleSpeechToText = async () => {
+    if (isRecording && sttRecorderRef.current) {
+      sttRecorderRef.current.stop();
       return;
     }
 
-    const SpeechRecognition = (window as unknown as Record<string, unknown>).SpeechRecognition ||
-      (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      sttChunksRef.current = [];
 
-    const recognition = new (SpeechRecognition as new () => SpeechRecognitionInstance)();
-    recognition.lang = selectedLang;
-    recognition.interimResults = false;
-    recognition.continuous = false;
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) sttChunksRef.current.push(e.data);
+      };
 
-    recognition.onresult = (e: SpeechRecognitionEvent) => {
-      const transcript = e.results[0][0].transcript;
-      setInputText(prev => prev + transcript);
-    };
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        setIsRecording(false);
 
-    recognition.onend = () => {
-      setIsRecording(false);
-    };
+        const audioBlob = new Blob(sttChunksRef.current, { type: 'audio/webm' });
+        if (audioBlob.size < 1000) return;
 
-    recognition.onerror = () => {
-      setIsRecording(false);
-    };
+        try {
+          const formData = new FormData();
+          formData.append('audio', audioBlob, 'stt.webm');
+          // 送語言代碼給 Whisper（zh-TW → zh）
+          const whisperLang = selectedLang.split('-')[0];
+          formData.append('lang', whisperLang);
 
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsRecording(true);
+          const res = await fetch('/api/transcribe', {
+            method: 'POST',
+            body: formData,
+          });
+          if (!res.ok) throw new Error('Transcription failed');
+          const data = await res.json();
+          if (data.text) {
+            setInputText(prev => prev + data.text);
+          }
+        } catch {
+          // 辨識失敗靜默處理
+        }
+      };
+
+      sttRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch {
+      // 無法取得麥克風
+    }
   };
 
   // === Emoji 插入 ===
@@ -822,7 +824,7 @@ export default function GuestChat() {
           </button>
 
           {/* Mic button: short press = STT, long press = voice recording */}
-          {hasSpeechRecognition && (
+          {hasVoiceInput && (
             <button
               type="button"
               onMouseDown={handleMicMouseDown}

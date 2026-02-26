@@ -12,6 +12,7 @@ import authRouter from './routes/auth.js';
 import roomsRouter from './routes/rooms.js';
 import chatRouter from './routes/chat.js';
 import uploadRouter from './routes/upload.js';
+import transcribeRouter from './routes/transcribe.js';
 import { setupSocket } from './socket.js';
 import { initDB } from './db/index.js';
 
@@ -51,6 +52,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/rooms', roomsRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/upload', uploadRouter);
+app.use('/api/transcribe', transcribeRouter);
 
 // Production: 靜態檔案 & SPA fallback（排除 /api/ 路徑）
 if (process.env.NODE_ENV === 'production') {
@@ -82,6 +84,9 @@ if (!process.env.JWT_SECRET) {
 }
 if (!process.env.GEMINI_API_KEY) {
   console.warn('[Startup] WARNING: GEMINI_API_KEY is not set. Translation will not work.');
+}
+if (!process.env.OPENAI_API_KEY) {
+  console.warn('[Startup] WARNING: OPENAI_API_KEY is not set. Whisper voice input will not work.');
 }
 
 await initDB();

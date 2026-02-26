@@ -237,7 +237,8 @@ export default function HostChat() {
 
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const sttRecorderRef = useRef<MediaRecorder | null>(null);
+  const sttChunksRef = useRef<Blob[]>([]);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -543,41 +544,55 @@ export default function HostChat() {
     }
   };
 
-  // 語音轉文字（原有功能）
-  const toggleRecording = () => {
-    if (isRecording) {
-      recognitionRef.current?.stop();
-      setIsRecording(false);
+  // 語音轉文字（Whisper STT）
+  const toggleRecording = async () => {
+    if (isRecording && sttRecorderRef.current) {
+      sttRecorderRef.current.stop();
       return;
     }
 
-    const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognitionAPI) {
-      alert('您的瀏覽器不支援語音輸入');
-      return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      sttChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) sttChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        setIsRecording(false);
+
+        const audioBlob = new Blob(sttChunksRef.current, { type: 'audio/webm' });
+        if (audioBlob.size < 1000) return;
+
+        try {
+          const formData = new FormData();
+          formData.append('audio', audioBlob, 'stt.webm');
+          const whisperLang = hostLang.split('-')[0];
+          formData.append('lang', whisperLang);
+
+          const res = await fetch('/api/transcribe', {
+            method: 'POST',
+            body: formData,
+          });
+          if (!res.ok) throw new Error('Transcription failed');
+          const data = await res.json();
+          if (data.text) {
+            setInput(prev => prev + data.text);
+          }
+        } catch {
+          // 辨識失敗靜默處理
+        }
+      };
+
+      sttRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch {
+      alert('無法存取麥克風');
     }
-
-    const recognition = new SpeechRecognitionAPI();
-    recognition.lang = hostLang;
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInput((prev) => prev + transcript);
-    };
-
-    recognition.onend = () => {
-      setIsRecording(false);
-    };
-
-    recognition.onerror = () => {
-      setIsRecording(false);
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsRecording(true);
   };
 
   // 格式化錄音時長
